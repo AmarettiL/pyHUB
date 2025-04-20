@@ -332,4 +332,5 @@ def reset_counter():
     return redirect('/')
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 10000))  # Usa la porta specificata da Render o 5000 come fallback
+    app.run(host='0.0.0.0', port=port, debug=True)
