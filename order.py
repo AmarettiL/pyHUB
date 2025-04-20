@@ -1,33 +1,103 @@
 import json
 from flask import Flask, render_template_string, request, redirect
+from escpos.printer import Usb
+from PIL import Image
+import os
 
-def format_order_for_printing(order_id, order, total):
+def crop_image(image_path, output_path):
+    """Ritaglia i margini bianchi dall'immagine."""
+    img = Image.open(image_path)
+    img = img.convert("RGB")  # Assicurati che l'immagine sia in RGB
+    bbox = img.getbbox()  # Ottieni i bordi non vuoti
+    cropped_img = img.crop(bbox)  # Ritaglia l'immagine
+    cropped_img.save(output_path)  # Salva l'immagine ritagliata
+
+def send_to_printer(order_id, formatted_order):
+    try:
+        # Configura la stampante USB
+        printer = Usb(0x0483, 0x5743)  # Sostituisci con il Vendor ID e Product ID
+
+        # Stampa il logo
+        logo_path = "static/BIANCO_cropped.png"
+        img = Image.open(logo_path)
+        printer.image(img)
+
+        # Stampa la sezione del cibo
+        printer.set(align='center', bold=True)
+        printer.text(f"Ordine n. {order_id}\n")
+        printer.set(align='left', bold=False)
+        printer.text("CIBO:\n")
+        printer.text(formatted_order['food'])
+        printer.text("\n" * 3)  # Spazio prima del taglio
+        printer.cut()
+    
+        # Stampa la sezione delle bevande
+        printer.set(align='center', bold=True)
+        printer.text(f"Ordine n. {order_id}\n")
+        printer.set(align='left', bold=False)
+        printer.text("BEVANDE:\n")
+        printer.text(formatted_order['drink'])
+        printer.text("\n" * 3)  # Spazio prima del taglio
+        printer.cut()
+
+        # Stampa lo scontrino di cortesia
+        printer.set(align='center', bold=True, double_height=True, double_width=True)
+        printer.text(f"Ordine n. {order_id}\n")
+        printer.set(align='left', bold=False, double_height=False, double_width=False)
+        printer.text("Scontrino di cortesia:\n")
+        printer.text(formatted_order['courtesy'])
+        printer.text("\n" * 3)  # Spazio prima del taglio
+        printer.cut()
+
+        print("Ordine inviato alla stampante con successo.")
+    except Exception as e:
+        print(f"Errore durante l'invio alla stampante: {e}")
+
+def format_order_for_printing(order_id, order):
     """Converte l'ordine in un formato leggibile per la stampa."""
-    lines = []
-    lines.append(f"Ordine n. {order_id}")
-    lines.append("-" * 30)
+    food_lines = []
+    drink_lines = []
+    courtesy_lines = []
+
+    # Separa cibo e bevande
     for item, qty in order.items():
-        lines.append(f"{item} x{qty} - €{MENU[item] * qty:.2f}")
-    lines.append("-" * 30)
-    lines.append(f"Totale: €{total:.2f}")
-    lines.append("\nGrazie per il tuo ordine!")
-    return "\n".join(lines)
+        if item in FOOD:
+            food_lines.append(f"{item} x{qty} - EUR {FOOD[item] * qty:.2f}")
+        elif item in DRINK:
+            drink_lines.append(f"{item} x{qty} - EUR {DRINK[item] * qty:.2f}")
+
+    # Scontrino di cortesia (senza prezzi)
+    courtesy_lines.append("-" * 30)
+    courtesy_lines.append(f"Ordine n. {order_id}")
+    courtesy_lines.append("-" * 30)
+    for item, qty in order.items():
+        courtesy_lines.append(f"{item} x{qty}")
+    courtesy_lines.append("-" * 30)
+
+    # Formatta le sezioni
+    formatted_order = {
+        'food': "\n".join(food_lines) + f"\nTotale Cibo: EUR {sum(FOOD[item] * qty for item, qty in order.items() if item in FOOD):.2f}\n",
+        'drink': "\n".join(drink_lines) + f"\nTotale Bevande: EUR {sum(DRINK[item] * qty for item, qty in order.items() if item in DRINK):.2f}\n",
+        'courtesy': "\n".join(courtesy_lines)
+    }
+
+    return formatted_order
 
 app = Flask(__name__)
 
-MENU = {
+FOOD = {
     'HUBurger': 10.00,
     'Bacon Cheese': 10.00,
     'Piadina farcita': 5.00,
     'Patate Fritte': 3.00,
+}
+
+DRINK = {
     'Acqua 0.5L': 1.00,
     'Coca-Cola': 3.00,
     'Birra': 4.00,
-    'Spritz': 5.00,
-    'Gin Lennon': 5.00,
-    'Gin Tonic': 5.00
+    'Drink': 5.00
 }
-
 order_counter = 1  # Inizializza il contatore degli ordini
 ORDERS_FILE = "orders.json"  # Nome del file JSON per salvare gli ordini
 
@@ -295,13 +365,13 @@ def index():
             temp_order = data.get('order', {})
             temp_total = data.get('total', 0.0)
         else:
-            for item in MENU:
+            for item in {**FOOD, **DRINK}:  # Unisci FOOD e DRINK
                 qty_str = request.form.get(item, '0')
                 try:
                     qty = int(qty_str)
                     if qty > 0:
                         temp_order[item] = qty
-                        temp_total += MENU[item] * qty
+                        temp_total += (FOOD.get(item, 0) + DRINK.get(item, 0)) * qty
                 except ValueError:
                     continue
 
@@ -312,14 +382,17 @@ def index():
             order = temp_order
             total = temp_total
             save_order_to_file(order_id, order, total)
-            formatted_order = format_order_for_printing(order_id, order, total)
+            formatted_order = format_order_for_printing(order_id, order)
             print({"status": "debug", "formatted_order": formatted_order})
+
+            # Invia l'ordine alla stampante USB
+            send_to_printer(order_id, formatted_order)
             order = {}
             total = 0.0
 
     return render_template_string(
         HTML_TEMPLATE,
-        menu=MENU,
+        menu={**FOOD, **DRINK},  # Unisci FOOD e DRINK per il menu
         order=order,
         total=total,
         order_id=display_order_id
