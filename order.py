@@ -8,6 +8,7 @@ printFood = False
 printDrink = False
 ORDERS_FILE = os.path.join(os.path.dirname(__file__), "orders.json")
 
+
 def send_to_printer_debug(order_id, formatted_order):
     """Simula l'invio alla stampante stampando nel log."""
     try:
@@ -67,6 +68,13 @@ def send_to_printer(order_id, formatted_order):
 
     # Stampa lo scontrino di cortesia
     if printFood or printDrink:  # Stampa solo se c'è cibo o bevande
+      # Stampa il logo
+      logo_path = os.path.join(os.path.dirname(__file__), "static/LOGO.png")
+      if os.path.exists(logo_path):
+        printer.set(align='center')  # Centra il logo
+        printer.image(logo_path)
+        printer.text("\n")  # Aggiungi una riga vuota dopo il logo
+
       printer.set(align='center', bold=True, double_height=True, double_width=True)
       printer.text(f"Ordine n. {order_id}\n")
       printer.set(align='left', bold=False, double_height=False, double_width=False)
@@ -92,24 +100,33 @@ def format_order_for_printing(order_id, order):
   for item, qty in order.items():
     if item in FOOD:
       printFood = True
-      food_lines.append(f"{item} x{qty} - EUR {FOOD[item] * qty:.2f}")
+      food_lines.append(f"{item} x{qty}")  # Rimuovi i prezzi
     elif item in DRINK:
       printDrink = True
-      drink_lines.append(f"{item} x{qty} - EUR {DRINK[item] * qty:.2f}")
+      drink_lines.append(f"{item} x{qty}")  # Rimuovi i prezzi
 
-  # Scontrino di cortesia (senza prezzi)
+  # Scontrino di cortesia (con prezzi e totale)
   courtesy_lines.append("-" * 30)
   courtesy_lines.append(f"Ordine n. {order_id}")
   courtesy_lines.append("-" * 30)
+  total_food = 0.0
+  total_drink = 0.0
   for item, qty in order.items():
-    courtesy_lines.append(f"{item} x{qty}")
+    if item in FOOD:
+      courtesy_lines.append(f"{item} x{qty} - EUR {FOOD[item] * qty:.2f}")
+      total_food += FOOD[item] * qty
+    elif item in DRINK:
+      courtesy_lines.append(f"{item} x{qty} - EUR {DRINK[item] * qty:.2f}")
+      total_drink += DRINK[item] * qty
+  courtesy_lines.append("-" * 30)
+  courtesy_lines.append(f"Totale: EUR {total_food + total_drink:.2f}")
   courtesy_lines.append("-" * 30)
 
   # Formatta le sezioni
   formatted_order = {
-    'food': "\n".join(food_lines) + f"\nTotale Cibo: EUR {sum(FOOD[item] * qty for item, qty in order.items() if item in FOOD):.2f}\n",
-    'drink': "\n".join(drink_lines) + f"\nTotale Bevande: EUR {sum(DRINK[item] * qty for item, qty in order.items() if item in DRINK):.2f}\n",
-    'courtesy': "\n".join(courtesy_lines)
+    'food': "\n".join(food_lines),  # Rimuovi i totali
+    'drink': "\n".join(drink_lines),  # Rimuovi i totali
+    'courtesy': "\n".join(courtesy_lines)  # Aggiungi i totali
   }
 
   return formatted_order
@@ -328,8 +345,16 @@ HTML_TEMPLATE = '''
         alert("Nessuna selezione effettuata. Aggiungi almeno un elemento all'ordine.");
         return false;
       }
-      alert(`Ordine n. ${orderId} confermato, invio alla stampante`);
-      return true;
+      // Mostra un pop-up di conferma con due opzioni: Conferma o Annulla
+      const userChoice = confirm(`Ordine n. ${orderId} confermato. Vuoi procedere con l'invio alla stampante?`);
+      if (userChoice) {
+        // L'utente ha scelto di confermare
+        return true;
+      } else {
+        // L'utente ha scelto di annullare
+        alert("Ordine annullato. Puoi modificarlo.");
+        return false;
+      }
     }
   </script>
 </head>
@@ -340,6 +365,8 @@ HTML_TEMPLATE = '''
         <h1>CL-Hub Festa del Sangiovese</h1>
       </div>
       <form method="post" onsubmit="return showConfirmation({{ order_id }})">
+        <button type="submit">Conferma</button>
+      </form>
       <table>
         <tr>
           <th>Elemento</th>
@@ -433,8 +460,8 @@ def index_post():
     print({"status": "debug", "formatted_order": formatted_order})
 
     # Invia l'ordine alla stampante USB
-    # send_to_printer(order_id, formatted_order)
-    send_to_printer_debug(order_id, formatted_order)
+    send_to_printer(order_id, formatted_order)
+    # send_to_printer_debug(order_id, formatted_order)
 
   # Reindirizza alla homepage dopo aver elaborato l'ordine
   return redirect('/')
