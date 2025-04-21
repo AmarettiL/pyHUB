@@ -365,8 +365,6 @@ HTML_TEMPLATE = '''
         <h1>CL-Hub Festa del Sangiovese</h1>
       </div>
       <form method="post" onsubmit="return showConfirmation({{ order_id }})">
-        <button type="submit">Conferma</button>
-      </form>
       <table>
         <tr>
           <th>Elemento</th>
